@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "memora"
+version = "0.1.0"
+description = "Lightweight memory network and reconstruction engine"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "José Ricardo Sánchez Aguas"}]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+memora = "memora.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["memora*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
