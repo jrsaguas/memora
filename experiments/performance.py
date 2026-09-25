@@ -11,28 +11,32 @@ from memora.core import Memora
 from experiments.benchmark import synthetic_message
 
 
-def build_memory(size: int, chats: int) -> tuple[Memora, list[int]]:
+def build_memory(size: int, chats: int) -> tuple[Memora, tempfile.TemporaryDirectory, list[int]]:
     tmp = tempfile.TemporaryDirectory(prefix="memora-performance-")
     path = Path(tmp.name) / "memory.db"
     m = Memora(path)
     chat_ids = [m.add_chat(f"Chat {i}") for i in range(chats)]
-    m._benchmark_tmp = tmp  # keep the directory alive until the caller closes it
-
     for i in range(size):
         m.add_message(
             chat_ids[i % chats],
             "user",
             synthetic_message(i, i % chats),
         )
-    return m, chat_ids
+    return m, tmp, chat_ids
 
 
 def median_ms(samples: list[float]) -> float:
     return statistics.median(samples) * 1000.0
 
 
+def p95_ms(samples: list[float]) -> float:
+    if len(samples) == 1:
+        return samples[0] * 1000.0
+    return statistics.quantiles(samples, n=20, method="inclusive")[18] * 1000.0
+
+
 def measure(size: int, chats: int, repeats: int) -> dict:
-    m, _ = build_memory(size, chats)
+    m, tmp, _ = build_memory(size, chats)
     query = "memoria contexto reconstruccion"
 
     search_samples = []
@@ -49,7 +53,6 @@ def measure(size: int, chats: int, repeats: int) -> dict:
     # Ingestion is measured separately so retrieval timings are not mixed with
     # database construction cost.
     m.close()
-    tmp = m._benchmark_tmp
     tmp.cleanup()
 
     return {
@@ -57,9 +60,9 @@ def measure(size: int, chats: int, repeats: int) -> dict:
         "chats": chats,
         "repeats": repeats,
         "search_median_ms": median_ms(search_samples),
-        "search_p95_ms": sorted(search_samples)[max(0, int(len(search_samples) * 0.95) - 1)] * 1000.0,
+        "search_p95_ms": p95_ms(search_samples),
         "recall_median_ms": median_ms(recall_samples),
-        "recall_p95_ms": sorted(recall_samples)[max(0, int(len(recall_samples) * 0.95) - 1)] * 1000.0,
+        "recall_p95_ms": p95_ms(recall_samples),
     }
 
 
