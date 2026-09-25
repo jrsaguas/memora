@@ -92,7 +92,7 @@ class Memora:
             - STOPWORDS
         )
 
-    def _node(self, kind, content, title="", external_id=None):
+    def _node(self, kind, content, title="", external_id=None, commit=True):
         digest = self._hash(kind, content, title)
         row = self.db.execute("SELECT id FROM nodes WHERE content_hash=?", (digest,)).fetchone()
         if row:
@@ -112,13 +112,14 @@ class Memora:
             "INSERT INTO node_fts(title,text,node_id) VALUES(?,?,?)",
             (title, " ".join(terms), str(node_id)),
         )
-        self.db.commit()
+        if commit:
+            self.db.commit()
         return node_id
 
     def add_chat(self, title, external_id=None):
         return self._node("chat", "", title, external_id)
 
-    def _promote_concept(self, term, message_id=None):
+    def _promote_concept(self, term, message_id=None, commit=True):
         row = self.db.execute(
             "SELECT COUNT(*) AS n FROM terms t JOIN nodes n ON n.id=t.node_id "
             "WHERE n.kind='message' AND t.term=?",
@@ -151,22 +152,25 @@ class Memora:
                 (message_id, concept, "mentions", 1.0),
             )
 
-        self.db.commit()
+        if commit:
+            self.db.commit()
         return concept
 
     def add_message(self, chat_id, role, content, external_id=None):
-        node_id = self._node("message", content, role, external_id)
-        self.link(node_id, chat_id, "belongs_to")
+        node_id = self._node("message", content, role, external_id, commit=False)
+        self.link(node_id, chat_id, "belongs_to", commit=False)
         for term in self._terms(content):
-            self._promote_concept(term, node_id)
+            self._promote_concept(term, node_id, commit=False)
+        self.db.commit()
         return node_id
 
-    def link(self, source_id, target_id, relation, weight=1.0):
+    def link(self, source_id, target_id, relation, weight=1.0, commit=True):
         self.db.execute(
             "INSERT OR REPLACE INTO edges(source_id,target_id,relation,weight) VALUES(?,?,?,?)",
             (source_id,target_id,relation,weight),
         )
-        self.db.commit()
+        if commit:
+            self.db.commit()
 
     def compact_concepts(self, min_frequency=None):
         """Rebuild concept nodes from reusable message terms.
