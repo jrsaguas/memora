@@ -6,6 +6,7 @@ def test_graph_and_compression(tmp_path):
     m = Memora(path)
     chat = m.add_chat("Proyecto memoria")
     msg = m.add_message(chat, "user", "Las redes conectadas permiten reconstruir contexto.")
+    m.add_message(chat, "assistant", "El contexto conecta redes con la memoria.")
     assert m.get(msg).content.startswith("Las redes")
     assert any(x.kind == "concept" for x in m.neighbors(msg))
     assert path.exists()
