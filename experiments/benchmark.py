@@ -17,7 +17,7 @@ BRIDGE_TERMS = (
 
 def synthetic_message(index: int, chat_index: int) -> str:
     bridge = BRIDGE_TERMS[index % len(BRIDGE_TERMS)]
-    unique = f"fragmento{index:06d} chat{chat_index:03d}"
+    unique = f"fragmento{index:06d}"
     return (
         f"{bridge}. "
         f"Este fragmento documenta una decision tecnica sobre MEMORA. "
