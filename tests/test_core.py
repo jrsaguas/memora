@@ -12,6 +12,28 @@ def test_graph_and_compression(tmp_path):
     m.close()
 
 
+def test_one_off_terms_do_not_create_concepts(tmp_path):
+    m = Memora(tmp_path / "memory.db")
+    chat = m.add_chat("A")
+    m.add_message(chat, "user", "palabraunica contexto")
+    assert m.stats()["nodes"].get("concept", 0) == 0
+    m.close()
+
+
+def test_reused_terms_create_shared_concept(tmp_path):
+    m = Memora(tmp_path / "memory.db")
+    chat_a = m.add_chat("A")
+    chat_b = m.add_chat("B")
+    first = m.add_message(chat_a, "user", "memoria compacta")
+    second = m.add_message(chat_b, "assistant", "memoria conectada")
+    concepts = [x for x in m.neighbors(first) if x.kind == "concept"]
+    assert len(concepts) == 1
+    concept_id = concepts[0].id
+    assert any(x.id == concept_id for x in m.neighbors(second))
+    assert m.stats()["nodes"]["concept"] == 1
+    m.close()
+
+
 def test_persistence_after_reopen(tmp_path):
     path = tmp_path / "memory.db"
     m = Memora(path)
@@ -48,6 +70,24 @@ def test_cross_chat_recall(tmp_path):
     ids = {item["id"] for item in result["reconstruction"]}
     assert first in ids
     assert second in ids
+    m.close()
+
+
+def test_compact_legacy_concepts(tmp_path):
+    m = Memora(tmp_path / "memory.db")
+    chat = m.add_chat("Migración")
+    first = m.add_message(chat, "user", "uno concepto")
+    second = m.add_message(chat, "assistant", "dos concepto")
+    legacy = m._node("concept", "ruido", "ruido")
+    m.link(first, legacy, "mentions")
+    before = m.stats()["nodes"]["concept"]
+    result = m.compact_concepts()
+    after = m.stats()["nodes"]["concept"]
+    assert before >= 2
+    assert result["concept_nodes"] == 1
+    assert after == 1
+    assert any(x.kind == "concept" for x in m.neighbors(first))
+    assert any(x.kind == "concept" for x in m.neighbors(second))
     m.close()
 
 
