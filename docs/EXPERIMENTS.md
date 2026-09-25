@@ -18,6 +18,9 @@ Every experiment should record:
 - reconstruction nodes;
 - cross-chat retrieval hits;
 - duplicate rate;
+- storage bytes per source byte;
+- concept/message ratio;
+- edge/message ratio;
 - false/noisy context observed during manual evaluation.
 
 The measurements are descriptive. They are not evidence of a general compression law.
@@ -50,7 +53,6 @@ A new memory mechanism is accepted only when it improves at least one measured c
 
 The experiment suite is part of the product, not an afterthought: MEMORA must be able to demonstrate what it remembers and why.
 
-
 ## Scaling benchmark
 
 The first scaling harness is `experiments/benchmark.py`. It generates controlled Spanish conversation fragments with:
@@ -59,20 +61,22 @@ The first scaling harness is `experiments/benchmark.py`. It generates controlled
 - unique fragment identifiers, which should remain terms rather than concept nodes;
 - messages distributed across multiple chats.
 
-Default run:
+Run the standard scaling battery:
+
+```powershell
+python -m experiments.benchmark --sizes 10 100 1000 5000 10000 --chats 10
+```
+
+For a smaller smoke run:
 
 ```powershell
 python -m experiments.benchmark
 ```
 
-This measures 10, 100, and 1000 messages. A custom run can be used for larger local experiments:
+The benchmark reports source UTF-8 bytes, normalized SQLite bytes, storage/source ratio, node/edge counts, edge/message ratio, unique terms, a counterfactual naive-concept proxy, concept/message ratio, concepts per 100 messages, estimated concept reduction against that proxy, lexical hits, reconstruction size, cross-chat coverage, and duplicate rate.
 
-```powershell
-python -m experiments.benchmark --sizes 1000 5000 10000 --chats 10
-```
+The naive concept count is explicitly a **counterfactual proxy**, not a historical reimplementation of every detail of the earliest MVP. It asks: "How many concept nodes would exist if every unique indexed term were materialized?" This makes the effect of concept promotion measurable without requiring two production policies to coexist.
 
-The benchmark reports source UTF-8 bytes, normalized SQLite bytes, node/edge counts, unique terms, concept/message ratio, lexical hits, reconstruction size, and the number of chats represented in reconstructed message evidence.
-
-SQLite is checkpointed before the database-size measurement so the WAL is not silently excluded from the reported persistent footprint. The benchmark is intentionally descriptive: storage growth and concept ratios are observations, not a proof of sublinear scaling.
+SQLite is checkpointed before the database-size measurement so the WAL is not silently excluded from the reported persistent footprint. The benchmark is intentionally descriptive: storage growth, ratios, and retrieval coverage are observations, not a proof of sublinear scaling.
 
 The small benchmark is also a regression test. Large sizes remain opt-in so CI stays deterministic and inexpensive.
