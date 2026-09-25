@@ -49,3 +49,30 @@ Compare repeated source content against the number of unique stored message/conc
 A new memory mechanism is accepted only when it improves at least one measured capability without causing an unacceptable regression in retrieval precision, traceability, stability, or storage growth.
 
 The experiment suite is part of the product, not an afterthought: MEMORA must be able to demonstrate what it remembers and why.
+
+
+## Scaling benchmark
+
+The first scaling harness is `experiments/benchmark.py`. It generates controlled Spanish conversation fragments with:
+
+- repeated bridge vocabulary, which should become shared concept nodes;
+- unique fragment identifiers, which should remain terms rather than concept nodes;
+- messages distributed across multiple chats.
+
+Default run:
+
+```powershell
+python -m experiments.benchmark
+```
+
+This measures 10, 100, and 1000 messages. A custom run can be used for larger local experiments:
+
+```powershell
+python -m experiments.benchmark --sizes 1000 5000 10000 --chats 10
+```
+
+The benchmark reports source UTF-8 bytes, normalized SQLite bytes, node/edge counts, unique terms, concept/message ratio, lexical hits, reconstruction size, and the number of chats represented in reconstructed message evidence.
+
+SQLite is checkpointed before the database-size measurement so the WAL is not silently excluded from the reported persistent footprint. The benchmark is intentionally descriptive: storage growth and concept ratios are observations, not a proof of sublinear scaling.
+
+The small benchmark is also a regression test. Large sizes remain opt-in so CI stays deterministic and inexpensive.
