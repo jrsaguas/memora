@@ -118,7 +118,7 @@ class Memora:
     def add_chat(self, title, external_id=None):
         return self._node("chat", "", title, external_id)
 
-    def _promote_concept(self, term):
+    def _promote_concept(self, term, message_id=None):
         row = self.db.execute(
             "SELECT COUNT(*) AS n FROM terms t JOIN nodes n ON n.id=t.node_id "
             "WHERE n.kind='message' AND t.term=?",
@@ -127,16 +127,30 @@ class Memora:
         if int(row["n"]) < self.concept_min_frequency:
             return None
 
-        concept = self._node("concept", term, term)
-        message_ids = self.db.execute(
-            "SELECT t.node_id FROM terms t JOIN nodes n ON n.id=t.node_id "
-            "WHERE n.kind='message' AND t.term=? ORDER BY t.node_id",
-            (term,),
-        ).fetchall()
-        self.db.executemany(
-            "INSERT OR IGNORE INTO edges(source_id,target_id,relation,weight) VALUES(?,?,?,?)",
-            [(int(r["node_id"]), concept, "mentions", 1.0) for r in message_ids],
-        )
+        digest = self._hash("concept", term, term)
+        existing = self.db.execute(
+            "SELECT id FROM nodes WHERE content_hash=?",
+            (digest,),
+        ).fetchone()
+        created = existing is None
+        concept = self._node("concept", term, term) if created else int(existing["id"])
+
+        if created:
+            message_ids = self.db.execute(
+                "SELECT t.node_id FROM terms t JOIN nodes n ON n.id=t.node_id "
+                "WHERE n.kind='message' AND t.term=? ORDER BY t.node_id",
+                (term,),
+            ).fetchall()
+            self.db.executemany(
+                "INSERT OR IGNORE INTO edges(source_id,target_id,relation,weight) VALUES(?,?,?,?)",
+                [(int(r["node_id"]), concept, "mentions", 1.0) for r in message_ids],
+            )
+        elif message_id is not None:
+            self.db.execute(
+                "INSERT OR IGNORE INTO edges(source_id,target_id,relation,weight) VALUES(?,?,?,?)",
+                (message_id, concept, "mentions", 1.0),
+            )
+
         self.db.commit()
         return concept
 
@@ -144,7 +158,7 @@ class Memora:
         node_id = self._node("message", content, role, external_id)
         self.link(node_id, chat_id, "belongs_to")
         for term in self._terms(content):
-            self._promote_concept(term)
+            self._promote_concept(term, node_id)
         return node_id
 
     def link(self, source_id, target_id, relation, weight=1.0):
