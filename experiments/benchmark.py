@@ -42,7 +42,7 @@ def measure(size: int, chats: int) -> dict:
             messages.append(content)
             m.add_message(chat_ids[chat_index], "user", content)
 
-        # Normalize WAL footprint before measuring persistent storage.
+        # Normalize the SQLite footprint before measuring the main database.
         m.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         m.db.commit()
 
@@ -50,6 +50,9 @@ def measure(size: int, chats: int) -> dict:
         unique_terms = int(
             m.db.execute("SELECT COUNT(DISTINCT term) FROM terms").fetchone()[0]
         )
+        duplicate_nodes = size - stats["nodes"].get("message", 0)
+        duplicate_rate = duplicate_nodes / size if size else 0.0
+
         cross_chat = m.recall(
             "memoria contexto reconstruccion",
             limit=min(20, max(4, size)),
@@ -60,20 +63,37 @@ def measure(size: int, chats: int) -> dict:
             for item in cross_chat["reconstruction"]
             if item["kind"] == "message" and item["chat_id"] is not None
         }
+
         concept_nodes = stats["nodes"].get("concept", 0)
         message_nodes = stats["nodes"].get("message", 0)
+        source_size = source_bytes(messages)
+        database_size = stats["database_bytes"]
 
         result = {
             "messages": size,
             "chats": chats,
-            "source_utf8_bytes": source_bytes(messages),
-            "database_bytes": stats["database_bytes"],
+            "source_utf8_bytes": source_size,
+            "database_bytes": database_size,
+            "storage_bytes_per_source_byte": (
+                database_size / source_size if source_size else 0.0
+            ),
             "nodes": stats["nodes"],
             "edges": stats["edges"],
+            "edges_per_message": stats["edges"] / message_nodes if message_nodes else 0.0,
             "unique_terms": unique_terms,
+            # Counterfactual proxy: if every unique indexed term became a
+            # concept node, this would be the concept-node count.
+            "naive_concept_nodes_proxy": unique_terms,
             "concept_to_message_ratio": (
                 concept_nodes / message_nodes if message_nodes else 0.0
             ),
+            "concepts_per_100_messages": (
+                concept_nodes * 100 / message_nodes if message_nodes else 0.0
+            ),
+            "concept_reduction_vs_naive_proxy": (
+                1.0 - concept_nodes / unique_terms if unique_terms else 0.0
+            ),
+            "duplicate_rate": duplicate_rate,
             "lexical_hits": len(cross_chat["matches"]),
             "reconstruction_nodes": len(cross_chat["reconstruction"]),
             "cross_chat_hits": len(hit_chat_ids),
@@ -98,7 +118,13 @@ def main() -> None:
         parser.error("sizes and chats must be positive")
 
     results = [measure(size, args.chats) for size in args.sizes]
-    print(json.dumps({"benchmark": "concept-promotion-scaling", "results": results}, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {"benchmark": "concept-promotion-scaling", "results": results},
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":
