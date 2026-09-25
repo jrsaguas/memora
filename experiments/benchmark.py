@@ -66,6 +66,11 @@ def measure(size: int, chats: int) -> dict:
 
         concept_nodes = stats["nodes"].get("concept", 0)
         message_nodes = stats["nodes"].get("message", 0)
+        mention_edges = int(
+            m.db.execute(
+                "SELECT COUNT(*) FROM edges WHERE relation='mentions'"
+            ).fetchone()[0]
+        )
         source_size = source_bytes(messages)
         database_size = stats["database_bytes"]
 
@@ -79,7 +84,10 @@ def measure(size: int, chats: int) -> dict:
             ),
             "nodes": stats["nodes"],
             "edges": stats["edges"],
-            "edges_per_message": stats["edges"] / message_nodes if message_nodes else 0.0,
+            "edges_per_message": (
+                stats["edges"] / message_nodes if message_nodes else 0.0
+            ),
+            "message_node_ratio": message_nodes / size if size else 0.0,
             "unique_terms": unique_terms,
             # Counterfactual proxy: if every unique indexed term became a
             # concept node, this would be the concept-node count.
@@ -92,6 +100,10 @@ def measure(size: int, chats: int) -> dict:
             ),
             "concept_reduction_vs_naive_proxy": (
                 1.0 - concept_nodes / unique_terms if unique_terms else 0.0
+            ),
+            "mention_edges": mention_edges,
+            "mention_edges_per_message": (
+                mention_edges / message_nodes if message_nodes else 0.0
             ),
             "duplicate_rate": duplicate_rate,
             "lexical_hits": len(cross_chat["matches"]),
