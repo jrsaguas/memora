@@ -9,6 +9,20 @@ from pathlib import Path
 
 TOKEN_RE = re.compile(r"[\wÀ-ÿ]{3,}", re.UNICODE)
 
+# High-frequency function words add little discriminative value to the graph.
+STOPWORDS = frozenset("""
+a al algo algunas algunos ante antes aqui aquí aquel aquella aquellas aquellos
+con contra cual cual es cuales como cómo de del desde donde dónde dos el ella
+ellas ello ellos en entre era eran es esa esas ese eso esos esta estaba estaban
+estas este esto estos fue fueron ha han hasta hay la las le les lo los más me mi
+mis mucho muy nada ni no nos o para pero por porque que qué se se sea sean si sí
+sin sobre son su sus también te tener tiene tienen tu tus un una unas uno unos
+ya y yo the a an and are as at be been but by for from had has have he her hers
+him his i if in into is it its me my no of on or our ours she that the their
+theirs them then there these they this those to was we were what when where which
+who will with you your yours
+""".split())
+
 @dataclass(frozen=True)
 class Memory:
     id: int
@@ -18,10 +32,15 @@ class Memory:
     created_at: str
 
 class Memora:
-    """Local-first memory graph backed by one SQLite database."""
+    """Local-first memory graph backed by one SQLite database.
 
-    def __init__(self, path: str | Path):
+    Terms are cheap index features. Concept nodes are promoted only when a
+    term is reused, preventing one-off words from becoming graph nodes.
+    """
+
+    def __init__(self, path: str | Path, concept_min_frequency: int = 2):
         self.path = str(path)
+        self.concept_min_frequency = max(2, int(concept_min_frequency))
         self.db = sqlite3.connect(self.path)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
@@ -68,7 +87,10 @@ class Memora:
 
     @staticmethod
     def _terms(text):
-        return sorted(set(t.lower() for t in TOKEN_RE.findall(text)))
+        return sorted(
+            set(t.lower() for t in TOKEN_RE.findall(text))
+            - STOPWORDS
+        )
 
     def _node(self, kind, content, title="", external_id=None):
         digest = self._hash(kind, content, title)
@@ -96,12 +118,33 @@ class Memora:
     def add_chat(self, title, external_id=None):
         return self._node("chat", "", title, external_id)
 
+    def _promote_concept(self, term):
+        row = self.db.execute(
+            "SELECT COUNT(*) AS n FROM terms t JOIN nodes n ON n.id=t.node_id "
+            "WHERE n.kind='message' AND t.term=?",
+            (term,),
+        ).fetchone()
+        if int(row["n"]) < self.concept_min_frequency:
+            return None
+
+        concept = self._node("concept", term, term)
+        message_ids = self.db.execute(
+            "SELECT t.node_id FROM terms t JOIN nodes n ON n.id=t.node_id "
+            "WHERE n.kind='message' AND t.term=? ORDER BY t.node_id",
+            (term,),
+        ).fetchall()
+        self.db.executemany(
+            "INSERT OR IGNORE INTO edges(source_id,target_id,relation,weight) VALUES(?,?,?,?)",
+            [(int(r["node_id"]), concept, "mentions", 1.0) for r in message_ids],
+        )
+        self.db.commit()
+        return concept
+
     def add_message(self, chat_id, role, content, external_id=None):
         node_id = self._node("message", content, role, external_id)
         self.link(node_id, chat_id, "belongs_to")
         for term in self._terms(content):
-            concept = self._node("concept", term, term)
-            self.link(node_id, concept, "mentions")
+            self._promote_concept(term)
         return node_id
 
     def link(self, source_id, target_id, relation, weight=1.0):
@@ -111,12 +154,41 @@ class Memora:
         )
         self.db.commit()
 
+    def compact_concepts(self, min_frequency=None):
+        """Rebuild concept nodes from reusable message terms.
+
+        This is the migration path for databases created by the early MVP,
+        where every token was materialized as a concept node.
+        """
+        threshold = max(2, int(min_frequency or self.concept_min_frequency))
+        old_ids = [
+            int(r["id"]) for r in self.db.execute(
+                "SELECT id FROM nodes WHERE kind='concept'"
+            )
+        ]
+        if old_ids:
+            marks = ",".join("?" * len(old_ids))
+            self.db.execute(f"DELETE FROM nodes WHERE id IN ({marks})", tuple(old_ids))
+        self.db.commit()
+
+        rows = self.db.execute(
+            "SELECT term, COUNT(*) AS n FROM terms t JOIN nodes n ON n.id=t.node_id "
+            "WHERE n.kind='message' GROUP BY term HAVING COUNT(*) >= ?",
+            (threshold,),
+        ).fetchall()
+        promoted = 0
+        for row in rows:
+            if self._promote_concept(row["term"]):
+                promoted += 1
+        return {"threshold": threshold, "concept_nodes": promoted}
+
     def _content(self, row):
         return zlib.decompress(row["payload"]).decode("utf-8") if row["payload"] else ""
 
     def _chat_for(self, node_id):
         row = self.db.execute(
-            "SELECT target_id FROM edges WHERE source_id=? AND relation='belongs_to'",
+            "SELECT target_id FROM edges WHERE source_id=? AND relation='belongs_to' "
+            "ORDER BY target_id LIMIT 1",
             (node_id,),
         ).fetchone()
         return int(row["target_id"]) if row else None
